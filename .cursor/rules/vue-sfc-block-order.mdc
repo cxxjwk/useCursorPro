@@ -1,0 +1,15 @@
+---
+description: Vue SFC block order — template before script
+globs: "**/*.vue"
+alwaysApply: false
+---
+
+# Vue 单文件组件块顺序
+
+在本项目中，`.vue` 文件内三个块的顺序固定为：
+
+1. **`<template>`** — 最先
+2. **`<script>`** 或 **`<script setup>`** — 其次
+3. **`<style>`** — 最后（若无样式可省略）
+
+新建或修改 Vue 组件时一律遵守，不要写成 script 在 template 之上。

@@ -1,0 +1,85 @@
+---
+description: mixturePro 仓库 Cursor 工作准则（八字口诀、Vue3+TS+Vite 高频、简洁写法、Cesium 全局）
+alwaysApply: true
+---
+
+# Cursor 工作准则（mixturePro）
+
+本规则约定在本仓库中使用 Cursor 时应遵守的行为与工程习惯。Agent 与协作者均以此为约束；**不确定或与下文冲突时，先问维护者再改**。
+
+## 八字口诀（总纲，须牢记）
+
+遇接口、执行路径、业务含义、架构取舍时，**先对照以下八句**，再动手写代码或改设计：
+
+1. 接口别瞎猜，查文档才不赖；
+2. 执行要清楚，确认才不糊涂；
+3. 业务别臆断，人类来明确；
+4. 接口别乱造，复用是个缘；
+5. 验证别跳过，测试才稳妥；
+6. 架构别乱改，规范心中在；
+7. 不懂别装懂，诚实是种功；
+8. 修改别莽撞，重构要稳当。
+
+## 优先级
+
+1. 准确完成当前明确任务。
+2. 改动小、可审查，与现有代码风格一致。
+3. 不做任务未要求的重构、全仓库格式化、或无关「顺手优化」。
+
+## 技术约定
+
+- **栈**：Vue 3 + TypeScript + Vite。
+- **Element Plus**：保持按需（`unplugin-vue-components` + `unplugin-auto-import` + `ElementPlusResolver`）。禁止在 `main.ts` 全量 `app.use(ElementPlus)` 或整包 `element-plus/dist/index.css`。
+- **图标**：`@element-plus/icons-vue` 仅在使用的组件内按需 `import`；禁止在入口全局注册全部图标。
+- **Cesium**：由 `src/cesium-global.ts` 在 `main.ts` 最先 `import` 一次，完成样式与模块并挂到 `globalThis`；地图类组件使用 `import { getCesium } from '…/cesium-global'` 后 `const Cesium = getCesium()`。**未经维护者同意**勿改回「入口/组件内动态 `import('cesium')`」等另一套加载方式。
+- **验证**：动到构建或依赖时，应保证 `npm run build` 可通过。
+
+## Vue 3 + TypeScript + Vite（高频约定）
+
+- **SFC**：新组件优先 **`<script setup>`**；单文件内 `<template>` / `<script>` / `<style>` 顺序遵守 `.cursor/rules/vue-sfc-block-order.mdc`。
+- **类型**：非必要不用 **`any`**；仅作类型使用时用 **`import type`**；环境变量类型集中在 **`src/vite-env.d.ts`** 的 `ImportMetaEnv` 中维护。
+- **自动导入**：`unplugin-auto-import` 已覆盖的 Vue / Vue Router 等 API **不要**再手写重复 `import`，与 `src/auto-imports.d.ts` 生成结果保持一致。
+- **路由**：路由级页面用 **动态 `import()`** 懒加载（与 `src/router/index.ts` 现有写法一致）；勿在入口同步引入大体积页面。
+- **环境变量**：只用 **`import.meta.env`**；暴露给浏览器的变量须 **`VITE_` 前缀**；勿把密钥、令牌写入仓库或提交 `.env.local`。
+- **静态资源**：长期固定 URL、无需哈希的放 **`public/`**；需打包与哈希的放 **`src/assets`** 并用 `import` 或 `new URL(..., import.meta.url)` 引用。
+- **副作用清理**：`watch`、定时器、`addEventListener`、第三方订阅等，在 **`onBeforeUnmount` / `onUnmounted`** 中成对撤销，避免泄漏与卸载后回调。
+- **Props / Emit**：`defineProps` / `defineEmits` **带类型**；禁止子组件直接 **修改 props**；事件名与 payload 与父级约定一致。
+- **响应式**：仅视图驱动的数据用 `ref` / `reactive`；大体量或非树形数据（地图实例、巨型列表项）优先 **`shallowRef`**，避免深度代理开销。
+- **Vite 配置**：勿随意改动 **`vite.config.ts`** 中与 **Cesium、`@zip.js/zip.js` alias** 相关的 `resolve.alias`，改动后必须 **`npm run build`** 验证。
+
+## 代码习惯
+
+- 改前读上下文；命名、类型、导入与周边一致。
+- 不删与任务无关的注释或逻辑；不写冗长占位注释。
+- 不擅自新增用户未要求的说明性文档（用户明确要求除外）。
+
+### 简洁与风格（维护者偏好）
+
+- **`<script setup>` 内可复用逻辑**：优先 **`const foo = () => {}` 箭头函数**，不用 `function foo()`。
+- **忌样板**：非必要不写 `void` 包一层 Promise；不在 `onMounted` 已能拿到 DOM 时再套一层无收益的 `nextTick` 仅为了 init；不为「偏门卸载竞态」叠 `destroyed` + `catch` 内再判断，除非产品明确要求。
+- **地图容器与类型**：初始化放在 `onMounted`；`const el = containerRef.value` + `if (!el) return` 后调用 `initCesium(el)`，避免在 init 内到处 `!` 或重复「是否挂载」语义。
+- **`import.meta.env`**：能一行取用的不要叠 `if/else` + `console.warn` 分支（除非明确要求提示用户）。
+- **`as const`**：非必要不用；需满足 Cesium/字面量类型时用**显式类型**（如 `Viewer.ConstructorOptions`）或显式数组元素类型，而非依赖大面积 `as const`。
+- **地图运行时错误**：非必要不用整段 `try/catch` 包住 init；渲染期异常优先 **`viewer.scene.renderError`**（按需 `showRenderLoopErrors: false`）与既有 `emit` 对齐。
+
+## 降低 Token 使用
+
+- 回复**简洁**：直入结论与必要步骤，避免重复用户已给出的信息、长篇开场与收尾客套。
+- **引用代替粘贴**：说明已有代码时用 Cursor 代码引用格式或少量行号片段；非必要不输出整文件、`node_modules` 或大段与任务无关的代码。
+- **工具与上下文**：优先小范围 `read_file`（带 offset/limit）与精确搜索；不批量打开无关文件；列举结果用短列表，勿展开全文。
+- **避免重复**：同一轮内不对已确认的结论再次冗长总结；用户未要教程/背景时，不写长文档式说明。
+
+## 必须先问维护者的情况
+
+- 多种实现且性能/安全/兼容性权衡差异大。
+- 与现有架构或本准则可能冲突。
+- 缺关键信息（环境、密钥、设计稿、验收、是否允许破坏性变更）。
+- 无法稳定复现或根因不清，需日志或业务规则。
+
+## 沟通
+
+- **默认使用中文**撰写说明、解释与讨论；若用户明确使用其他语言或要求切换，则跟随用户。
+- 说明改了什么、为什么；必要时附代码引用。
+- 路径、命令、标识符、API 名等与仓库及生态一致（可与中文混排）。
+
+_若与单次对话中用户的明确指令冲突，以该次指令为准。_
