@@ -49,6 +49,7 @@ alwaysApply: true
 
 ## 代码习惯
 
+- **Git 提交说明**：每次提交、推送时，提交信息（标题或正文）须包含 **`cxx`**。
 - 改前读上下文；命名、类型、导入与周边一致。
 - 不删与任务无关的注释或逻辑；不写冗长占位注释。
 - 不擅自新增用户未要求的说明性文档（用户明确要求除外）。
@@ -59,7 +60,7 @@ alwaysApply: true
 - **少冗余判断与转换**：维护者**未要求**时，不对已是正确形态的值再包一层判断、编码/解码（如无需则不用 `encodeURIComponent`）、或「防御性」类型转换；接口或规范**明确要求**时再处理。
 - **卸载取消标志**：维护者**未明确要求**时，不增加「卸载后置位 + 异步内反复检测取消」类标志（如 `*LoadCancelled`）、不向工具函数传 `isCancelled` 类选项；确有复现场景或产品要求避免异步晚于卸载仍操作实例时再实现。
 - **忌样板**：非必要不写 `void` 包一层 Promise；不在 `onMounted` 已能拿到 DOM 时再套一层无收益的 `nextTick` 仅为了 init；不为「偏门卸载竞态」叠 `destroyed` + `catch` 内再判断，除非产品明确要求。
-- **地图容器与类型**：初始化放在 `onMounted`；`const el = containerRef.value` + `if (!el) return` 后调用 `initCesium(el)`，避免在 init 内到处 `!` 或重复「是否挂载」语义。
+- **地图容器与类型**：初始化放在 `onMounted`，直接 `initCesium(containerRef.value!)`；避免再套 `const el` + `if (!el) return` 等冗余判空。
 - **`import.meta.env`**：能一行取用的不要叠 `if/else` + `console.warn` 分支（除非明确要求提示用户）。
 - **`as const`**：非必要不用；需满足 Cesium/字面量类型时用**显式类型**（如 `Viewer.ConstructorOptions`）或显式数组元素类型，而非依赖大面积 `as const`。**已通过 `vue-tsc` 的写法勿再叠 `as const`**；`CesiumMap.vue` 与 `Map.vue` 等同类片段改一处须同步另一处，避免回潮。
 - **地图运行时错误**：非必要不用整段 `try/catch` 包住 init；渲染期异常优先 **`viewer.scene.renderError`**（按需 `showRenderLoopErrors: false`）与既有 `emit` 对齐。

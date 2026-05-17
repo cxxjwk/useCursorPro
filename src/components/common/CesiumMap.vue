@@ -96,9 +96,7 @@ const initCesium = (el: HTMLElement) => {
 }
 
 onMounted(() => {
-  const el = containerRef.value
-  if (!el) return
-  initCesium(el)
+  initCesium(containerRef.value!)
 })
 
 onBeforeUnmount(() => {
