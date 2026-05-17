@@ -2,7 +2,7 @@
   <div class="bayu-screen" aria-label="巴渝治水大屏">
     <header class="bayu-screen__head">
       <h1 class="bayu-screen__title">巴渝治水 · 突发事故</h1>
-      <p class="bayu-screen__sub">空白球体 + 天地图影像与注记（需 VITE_TIANDITU_TOKEN）</p>
+      <p class="bayu-screen__sub">天地图影像 + 重庆市域高亮（需 VITE_TIANDITU_TOKEN，边界数据走外网）</p>
     </header>
     <div class="bayu-screen__map">
       <CesiumMap />
@@ -12,7 +12,6 @@
 
 <script setup lang="ts">
 import CesiumMap from '../components/common/CesiumMap.vue'
-console.log(import.meta.env.VITE_TIANDITU_TOKEN, '123')
 </script>
 
 <style scoped>

@@ -11,6 +11,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    open: false,
+  },
+  preview: {
+    open: false,
+  },
   resolve: {
     alias: {
       // Cesium 1.129 仍引用 zip-no-worker；@zip.js/zip.js 2.8+ 已移除该导出，预构建会失败

@@ -125,9 +125,7 @@ function flyCameraToChongqingBbox(
   Cesium: CesiumMod,
   viewer: Viewer,
   geometry: GeoPolygon | GeoMultiPolygon,
-  isCancelled?: () => boolean,
 ) {
-  if (isCancelled?.()) return
   const { west, south, east, north } = bboxFromGeometry(geometry)
   const lonSpan = Math.max(east - west, 0.25)
   const latSpan = Math.max(north - south, 0.2)
@@ -145,8 +143,7 @@ function flyCameraToChongqingBbox(
   )
 }
 
-function flyCameraFallback(Cesium: CesiumMod, viewer: Viewer, isCancelled?: () => boolean) {
-  if (isCancelled?.()) return
+function flyCameraFallback(Cesium: CesiumMod, viewer: Viewer) {
   const r = CHONGQING_VIEW_RECT_DEG
   flyCameraToChongqingRectangle(Cesium, viewer, r.west, r.south, r.east, r.north, 1.8)
 }
@@ -154,58 +151,48 @@ function flyCameraFallback(Cesium: CesiumMod, viewer: Viewer, isCancelled?: () =
 export async function addChongqingRegionStyle(
   Cesium: CesiumMod,
   viewer: Viewer,
-  options?: { isCancelled?: () => boolean },
 ): Promise<void> {
-  const isCancelled = options?.isCancelled
-
   let res: Response
   try {
     res = await fetch(CHONGQING_GEOJSON)
   } catch (e) {
     console.warn('[chongqingMapLayer] 边界数据请求失败', e)
-    flyCameraFallback(Cesium, viewer, isCancelled)
+    flyCameraFallback(Cesium, viewer)
     return
   }
   if (!res.ok) {
-    flyCameraFallback(Cesium, viewer, isCancelled)
+    flyCameraFallback(Cesium, viewer)
     return
   }
-  if (isCancelled?.()) return
 
   let gj: { features?: { geometry: GeoPolygon | GeoMultiPolygon }[] }
   try {
     gj = await res.json()
   } catch {
-    flyCameraFallback(Cesium, viewer, isCancelled)
+    flyCameraFallback(Cesium, viewer)
     return
   }
   const feature = gj.features?.[0]
   if (!feature?.geometry) {
-    flyCameraFallback(Cesium, viewer, isCancelled)
+    flyCameraFallback(Cesium, viewer)
     return
   }
-  if (isCancelled?.()) return
 
   const geom = feature.geometry
   if (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon') {
-    flyCameraFallback(Cesium, viewer, isCancelled)
+    flyCameraFallback(Cesium, viewer)
     return
   }
 
-  if (isCancelled?.()) return
-
   const partHierarchies = collectPartHierarchies(Cesium, geom)
-
-  const worldOuter = Cesium.Cartesian3.fromDegreesArray([
-    72, 8, 138, 8, 138, 42, 72, 42, 72, 8,
-  ])
-
-  const maskHierarchy = new Cesium.PolygonHierarchy(worldOuter, partHierarchies)
 
   viewer.entities.add({
     name: '重庆-外区压暗',
     polygon: {
-      hierarchy: maskHierarchy,
+      hierarchy: new Cesium.PolygonHierarchy(
+        Cesium.Cartesian3.fromDegreesArray([72, 8, 138, 8, 138, 42, 72, 42, 72, 8]),
+        partHierarchies,
+      ),
       height: 0,
       material: Cesium.Color.fromCssColorString('#031208').withAlpha(0.68),
       outline: false,
@@ -226,15 +213,10 @@ export async function addChongqingRegionStyle(
     })
   }
 
-  const exteriorRings = collectExteriorRings(geom)
-  const shadowH = 350
-  const glowH = 520
-  const offset = 0.018
-
-  for (const ring of exteriorRings) {
-    const shadowRing = ring.map(([lon, lat]) => [lon + offset, lat - offset] as [number, number])
-    const shadowFlat = ringToDegreesHeights(shadowRing, shadowH)
-    const glowFlat = ringToDegreesHeights(ring, glowH)
+  for (const ring of collectExteriorRings(geom)) {
+    const shadowRing = ring.map(([lon, lat]) => [lon + 0.018, lat - 0.018] as [number, number])
+    const shadowFlat = ringToDegreesHeights(shadowRing, 350)
+    const glowFlat = ringToDegreesHeights(ring, 520)
 
     viewer.entities.add({
       name: '重庆-边界影',
@@ -270,7 +252,6 @@ export async function addChongqingRegionStyle(
     })
   }
 
-  const mainRiverH = 650
   const mainFlat = ringToDegreesHeights(
     [
       [105.95, 28.75],
@@ -280,30 +261,25 @@ export async function addChongqingRegionStyle(
       [108.15, 29.58],
       [108.75, 29.45],
     ],
-    mainRiverH,
+    650,
   )
-  const subFlat = ringToDegreesHeights(
-    [
-      [105.65, 29.55],
-      [106.2, 29.75],
-      [106.85, 29.85],
-      [107.45, 29.7],
-    ],
-    mainRiverH,
-  )
-
-  const subColor = Cesium.Color.fromCssColorString('#6ee7b7').withAlpha(0.82)
-  const mainGlow = new Cesium.PolylineGlowMaterialProperty({
-    glowPower: 0.3,
-    color: Cesium.Color.fromCssColorString('#4ade80').withAlpha(0.98),
-  })
 
   viewer.entities.add({
     name: '河流-支流',
     polyline: {
-      positions: Cesium.Cartesian3.fromDegreesArrayHeights(subFlat),
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights(
+        ringToDegreesHeights(
+          [
+            [105.65, 29.55],
+            [106.2, 29.75],
+            [106.85, 29.85],
+            [107.45, 29.7],
+          ],
+          650,
+        ),
+      ),
       width: 3.5,
-      material: subColor,
+      material: Cesium.Color.fromCssColorString('#6ee7b7').withAlpha(0.82),
       arcType: Cesium.ArcType.GEODESIC,
     },
   })
@@ -323,10 +299,13 @@ export async function addChongqingRegionStyle(
     polyline: {
       positions: Cesium.Cartesian3.fromDegreesArrayHeights(mainFlat),
       width: 7,
-      material: mainGlow,
+      material: new Cesium.PolylineGlowMaterialProperty({
+        glowPower: 0.3,
+        color: Cesium.Color.fromCssColorString('#4ade80').withAlpha(0.98),
+      }),
       arcType: Cesium.ArcType.GEODESIC,
     },
   })
 
-  flyCameraToChongqingBbox(Cesium, viewer, geom, isCancelled)
+  flyCameraToChongqingBbox(Cesium, viewer, geom)
 }

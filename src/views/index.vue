@@ -10,8 +10,6 @@
   </main>
 </template>
 
-<script setup lang="ts"></script>
-
 <style scoped>
 .view-index {
   box-sizing: border-box;

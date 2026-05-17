@@ -6,6 +6,7 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import type { Viewer } from 'cesium'
 import { getCesium } from '../../cesium-global'
+import { addChongqingRegionStyle, presetChongqingViewport } from '../../utils/chongqingMapLayer'
 
 const Cesium = getCesium()
 
@@ -20,34 +21,11 @@ const emit = defineEmits<{
 const containerRef = ref<HTMLElement | null>(null)
 const viewerRef = shallowRef<Viewer | null>(null)
 let resizeObserver: ResizeObserver | null = null
-let removeSceneRenderErrorListener: (() => void) | null = null
 
-const tiandituDataServerUrl = (layer: 'img_w' | 'cia_w', tk: string) => {
-  const key = encodeURIComponent(tk)
-  return `https://t{s}.tianditu.gov.cn/DataServer?T=${layer}&x={x}&y={y}&l={z}&tk=${key}`
-}
-
-/** 关闭默认 UI，自管底图与地形 */
-const viewerUiDisabled: Viewer.ConstructorOptions = {
-  animation: false,
-  timeline: false,
-  homeButton: false,
-  sceneModePicker: false,
-  baseLayerPicker: false,
-  navigationHelpButton: false,
-  geocoder: false,
-  fullscreenButton: false,
-  vrButton: false,
-  selectionIndicator: false,
-  infoBox: false,
-  baseLayer: false,
-}
-
-const styleMinimalGlobe = (viewer: Viewer, Cesium: CesiumMod) => {
-  const blank = Cesium.Color.fromCssColorString('#030a06')
-  viewer.scene.backgroundColor = blank
+const styleMinimalGlobe = (viewer: Viewer) => {
+  viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#030a06')
   viewer.scene.globe.show = true
-  viewer.scene.globe.baseColor = blank
+  viewer.scene.globe.baseColor = viewer.scene.backgroundColor
   viewer.scene.globe.showGroundAtmosphere = false
   viewer.scene.skyBox.show = false
   viewer.scene.sun.show = false
@@ -55,49 +33,55 @@ const styleMinimalGlobe = (viewer: Viewer, Cesium: CesiumMod) => {
   viewer.scene.skyAtmosphere.show = true
 }
 
-const tiandituSubdomains = ['0', '1', '2', '3', '4', '5', '6', '7']
-
-const addTiandituImagery = (viewer: Viewer, Cesium: CesiumMod, tk: string) => {
-  const credit = new Cesium.Credit('天地图', false)
-  const tilingScheme = new Cesium.WebMercatorTilingScheme()
-  const common = {
-    subdomains: tiandituSubdomains,
-    tilingScheme,
-    maximumLevel: 18,
-    credit,
-  }
-  const tiandituLayers: ('img_w' | 'cia_w')[] = ['img_w', 'cia_w']
-  for (const layer of tiandituLayers) {
-    viewer.imageryLayers.addImageryProvider(
-      new Cesium.UrlTemplateImageryProvider({
-        url: tiandituDataServerUrl(layer, tk),
-        ...common,
-      }),
-    )
-  }
+const addTiandituImagery = (viewer: Viewer, tk: string) => {
+  viewer.imageryLayers.addImageryProvider(
+    new Cesium.WebMapTileServiceImageryProvider({
+      url:
+        `https://t{s}.tianditu.gov.cn/img_w/wmts?service=wmts&request=GetTile&version=1.0.0` +
+        `&LAYER=img&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}` +
+        `&style=default&format=tiles&tk=${tk}`,
+      layer: 'img',
+      style: 'default',
+      format: 'tiles',
+      tileMatrixSetID: 'w',
+      subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+      tilingScheme: new Cesium.WebMercatorTilingScheme(),
+      maximumLevel: 18,
+      credit: new Cesium.Credit('天地图', false),
+    }),
+  )
 }
 
 /** 使用入口已注入的全局 `Cesium`（仿赣州 MapContainer.initCesium） */
 const initCesium = (el: HTMLElement) => {
   const viewer = new Cesium.Viewer(el, {
-    ...viewerUiDisabled,
+    animation: false,
+    timeline: false,
+    homeButton: false,
+    sceneModePicker: false,
+    baseLayerPicker: false,
+    navigationHelpButton: false,
+    geocoder: false,
+    fullscreenButton: false,
+    vrButton: false,
+    selectionIndicator: false,
+    infoBox: false,
+    baseLayer: false,
     showRenderLoopErrors: false,
     terrainProvider: new Cesium.EllipsoidTerrainProvider(),
     contextOptions: { webgl: { alpha: false } },
   })
 
-  removeSceneRenderErrorListener = viewer.scene.renderError.addEventListener((_scene, err) => {
+  viewer.scene.renderError.addEventListener((_scene, err) => {
     console.error('[CesiumMap] Cesium 场景错误', err)
     emit('viewerInitFailed', err)
   })
 
-  viewer.camera.setView({
-    destination: Cesium.Rectangle.fromDegrees(105.5, 28.5, 110.0, 31.5),
-  })
+  presetChongqingViewport(Cesium, viewer)
   viewer.imageryLayers.removeAll()
-  styleMinimalGlobe(viewer, Cesium)
+  styleMinimalGlobe(viewer)
 
-  addTiandituImagery(viewer, Cesium, import.meta.env.VITE_TIANDITU_TOKEN?.trim() ?? '')
+  addTiandituImagery(viewer, import.meta.env.VITE_TIANDITU_TOKEN?.trim() ?? '')
 
   viewer.scene.fog.enabled = true
   viewer.scene.screenSpaceCameraController.minimumZoomDistance = 2000
@@ -107,6 +91,8 @@ const initCesium = (el: HTMLElement) => {
   resizeObserver = new ResizeObserver(() => viewer.resize())
   resizeObserver.observe(el)
   emit('viewerReady', viewer, Cesium)
+
+  addChongqingRegionStyle(Cesium, viewer)
 }
 
 onMounted(() => {
@@ -116,8 +102,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  removeSceneRenderErrorListener?.()
-  removeSceneRenderErrorListener = null
   resizeObserver?.disconnect()
   resizeObserver = null
   viewerRef.value?.destroy()
