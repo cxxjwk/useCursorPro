@@ -3,25 +3,26 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Viewer } from 'cesium'
 import { getCesium } from '../cesium-global'
 
-/** 与赣州全局 `Cesium` 用法一致（由入口 `cesium-global` 注入后再取引用） */
 const Cesium = getCesium()
 
 type CesiumMod = typeof import('cesium')
 
 const emit = defineEmits<{
   viewerReady: [viewer: Viewer, cesium: CesiumMod]
-  /** 场景渲染错误等（见 Scene#renderError）时触发 */
   viewerInitFailed: [error: unknown]
 }>()
 
+// ---------- 模块状态 ----------
 const containerRef = ref<HTMLElement | null>(null)
-const viewerRef = shallowRef<Viewer | null>(null)
+const viewerRef = ref<Viewer | null>(null)
 let resizeObserver: ResizeObserver | null = null
 
+// ---------- 1. 初始化地图（底图 → viewer-ready）----------
+/** 深色极简地球样式 */
 const styleMinimalGlobe = (viewer: Viewer) => {
   viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#030a06')
   viewer.scene.globe.show = true
@@ -33,18 +34,16 @@ const styleMinimalGlobe = (viewer: Viewer) => {
   viewer.scene.skyAtmosphere.show = true
 }
 
-const addTiandituImagery = (viewer: Viewer, tk: string) => {
+/** 叠加天地图影像（dev 走 Vite 代理，避免 localhost CORS） */
+const addTiandituImagery = (viewer: Viewer) => {
+  const tk = import.meta.env.VITE_TIANDITU_TOKEN?.trim() ?? ''
+  const isDev = import.meta.env.DEV
   viewer.imageryLayers.addImageryProvider(
-    new Cesium.WebMapTileServiceImageryProvider({
-      url:
-        `https://t{s}.tianditu.gov.cn/img_w/wmts?service=wmts&request=GetTile&version=1.0.0` +
-        `&LAYER=img&tileMatrixSet=w&TileMatrix={TileMatrix}&TileRow={TileRow}&TileCol={TileCol}` +
-        `&style=default&format=tiles&tk=${tk}`,
-      layer: 'img',
-      style: 'default',
-      format: 'tiles',
-      tileMatrixSetID: 'w',
-      subdomains: ['0', '1', '2', '3', '4', '5', '6', '7'],
+    new Cesium.UrlTemplateImageryProvider({
+      url: isDev
+        ? `/tianditu-proxy/DataServer?T=img_w&x={x}&y={y}&l={z}&tk=${tk}`
+        : `https://t{s}.tianditu.gov.cn/DataServer?T=img_w&x={x}&y={y}&l={z}&tk=${tk}`,
+      subdomains: isDev ? undefined : ['0', '1', '2', '3', '4', '5', '6', '7'],
       tilingScheme: new Cesium.WebMercatorTilingScheme(),
       maximumLevel: 18,
       credit: new Cesium.Credit('天地图', false),
@@ -52,8 +51,9 @@ const addTiandituImagery = (viewer: Viewer, tk: string) => {
   )
 }
 
-/** 仿赣州 `MapContainer.initCesium`：使用入口已注入的全局 `Cesium` */
-const initCesium = (el: HTMLElement) => {
+/** 创建 Viewer 并加载天地图影像（读模块级 containerRef） */
+const initCesium = () => {
+  const el = containerRef.value as HTMLElement
   const viewer = new Cesium.Viewer(el, {
     animation: false,
     timeline: false,
@@ -77,25 +77,23 @@ const initCesium = (el: HTMLElement) => {
     emit('viewerInitFailed', err)
   })
 
+  viewerRef.value = viewer
   viewer.imageryLayers.removeAll()
   styleMinimalGlobe(viewer)
-
-  addTiandituImagery(viewer, import.meta.env.VITE_TIANDITU_TOKEN?.trim() ?? '')
+  addTiandituImagery(viewer)
 
   viewer.scene.fog.enabled = true
   viewer.scene.screenSpaceCameraController.minimumZoomDistance = 2000
   viewer.scene.screenSpaceCameraController.maximumZoomDistance = 20000000
-  viewerRef.value = viewer
 
-  resizeObserver = new ResizeObserver(() => viewer.resize())
+  resizeObserver = new ResizeObserver(() => viewerRef.value?.resize())
   resizeObserver.observe(el)
   emit('viewerReady', viewer, Cesium)
 }
 
+// ---------- 生命周期 ----------
 onMounted(() => {
-  const el = containerRef.value
-  if (!el) return
-  initCesium(el)
+  initCesium()
 })
 
 onBeforeUnmount(() => {
@@ -106,14 +104,14 @@ onBeforeUnmount(() => {
 })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .map-cesium-host {
   width: 100%;
   height: 100%;
   min-height: 0;
-}
 
-.map-cesium-host :deep(.cesium-viewer-bottom) {
-  display: none;
+  :deep(.cesium-viewer-bottom) {
+    display: none;
+  }
 }
 </style>

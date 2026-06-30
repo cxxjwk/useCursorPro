@@ -19,7 +19,7 @@ watchEffect(() => {
 })
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .app-route-nav {
   position: fixed;
   top: 10px;
@@ -29,33 +29,35 @@ watchEffect(() => {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-}
 
-.app-route-nav a {
-  color: #5c5766;
-  text-decoration: none;
-}
+  a {
+    color: #5c5766;
+    text-decoration: none;
 
-.app-route-nav a.router-link-active {
-  font-weight: 600;
-  color: #08060d;
-}
+    &.router-link-active {
+      font-weight: 600;
+      color: #08060d;
+    }
+  }
 
-.app-route-nav--on-dark a {
-  color: #86efac;
-}
+  &__sep {
+    opacity: 0.45;
+    user-select: none;
+  }
 
-.app-route-nav--on-dark a.router-link-active {
-  color: #ecfdf5;
-  text-shadow: 0 0 8px rgba(74, 222, 128, 0.45);
-}
+  &--on-dark {
+    a {
+      color: #86efac;
 
-.app-route-nav__sep {
-  opacity: 0.45;
-  user-select: none;
-}
+      &.router-link-active {
+        color: #ecfdf5;
+        text-shadow: 0 0 8px rgba(74, 222, 128, 0.45);
+      }
+    }
 
-.app-route-nav--on-dark .app-route-nav__sep {
-  color: #5d8f72;
+    .app-route-nav__sep {
+      color: #5d8f72;
+    }
+  }
 }
 </style>

@@ -1,11 +1,15 @@
 ---
-description: mixturePro 仓库 Cursor 工作准则（八字口诀、Vue3+TS+Vite 高频、简洁写法、Cesium 全局）
+description: mixturePro 仓库 Cursor 工作准则（八字口诀、Vue3+TS+Vite、SCSS 样式、简洁写法、Cesium 全局）
 alwaysApply: true
 ---
 
 # Cursor 工作准则（mixturePro）
 
 本规则约定在本仓库中使用 Cursor 时应遵守的行为与工程习惯。Agent 与协作者均以此为约束；**不确定或与下文冲突时，先问维护者再改**。
+
+## 动手前（必读）
+
+**每次**在本仓库新增或修改代码前，须先阅读本文件（`.cursor/rules/cursorrules.mdc`）及与当前任务相关的规则，再下手；不得凭习惯引入与下文冲突的写法。
 
 ## 八字口诀（总纲，须牢记）
 
@@ -26,6 +30,30 @@ alwaysApply: true
 2. 改动小、可审查，与现有代码风格一致。
 3. 不做任务未要求的重构、全仓库格式化、或无关「顺手优化」。
 
+### 改动范围（维护者硬性标准）
+
+- **让改哪里就改哪里**：严格按用户点名的文件、函数、行号或行为改；**不发散**到未提及的模块、文件或「顺便」优化。
+- **非必要不动其它代码**：为实现当前任务所**必需**的最小 diff；不顺手改命名、抽函数、统一风格、删注释、改类型谓词等任务外内容（除非不修就无法通过构建且用户已要求验证构建）。
+- **尤其不要乱改样式**：用户未明确要求时，**不修改**布局类名、颜色、间距、主题等视觉表现；样式文件格式迁移（如改 `lang="scss"`）不改变视觉效果。
+
+### 编码硬性标准（维护者汇总，与「简洁与风格」一并遵守）
+
+| 项 | 要求 |
+| --- | --- |
+| 动手前 | 先读本准则，再写代码 |
+| 改动范围 | 让改哪里改哪里；非必要不顺手改其它文件 |
+| 实现方式 | **逻辑简单、代码少量**完成功能；**不写非必要代码**；不加非必要判断、非必要参数、非必要方法 |
+| 性能 | **尽可能少消耗**：不叠无收益的 Cesium/ DOM / 动画操作；能一次到位的不做「先加再删再抬层」类重复步骤 |
+| 少代码 | 互斥用 `if / else if / else`；避免连续 `if (!cond) return` 守卫早退，用正向 `if (cond) { … }`；`onMounted` 内模板 ref 已挂载，不做多余 DOM 判空 |
+| 状态 | 能放 `<script setup>` 顶层的 `ref` / `let` 放外面，子函数直接读，非必要不层层传参 |
+| 接口数据 | 请求结果写入模块级列表/变量；循环绘制时设「当前项」到模块级，子函数直接读，**禁止** `addXxx(rec)` 式层层传参 |
+| 样式 | 全项目 SCSS（见下）；迁移时不改视觉 |
+| 样板 | 非必要不写 `void` 包 Promise |
+| 响应式 | 非必要不用 `shallowRef`，优先 `ref` / `reactive` |
+| 注释 | 有必要须写：每个函数/方法用一行说明**做什么**；业务与非显然逻辑须注释；不写复述代码的废话 |
+| 代码顺序 | 单文件按**业务执行顺序**书写，与生命周期一致；用 `// ---------- N. 阶段 ----------` 分段（见下「地图/大屏书写顺序」） |
+| TypeScript | **禁止**非空断言 `!`；用 `if (x) { … }` 收窄类型，或只读场景用 `?.`；禁止 `!!` 转布尔 |
+
 ## 技术约定
 
 - **栈**：Vue 3 + TypeScript + Vite。
@@ -37,33 +65,40 @@ alwaysApply: true
 ## Vue 3 + TypeScript + Vite（高频约定）
 
 - **SFC**：新组件优先 **`<script setup>`**；单文件内 `<template>` / `<script>` / `<style>` 顺序遵守 `.cursor/rules/vue-sfc-block-order.mdc`。
+- **样式（全项目 SCSS，维护者硬性标准）**：本仓库**一律用 SCSS**。全局样式入口为 **`src/style.scss`**；Vue SFC 的 `<style>` **必须** **`lang="scss"`**；在保持现有 BEM 类名前提下，用 SCSS 嵌套（如 `.block { &__head { } }`）组织，**迁移时不改选择器含义与视觉表现**。
 - **类型**：非必要不用 **`any`**；仅作类型使用时用 **`import type`**；环境变量类型集中在 **`src/vite-env.d.ts`** 的 `ImportMetaEnv` 中维护。
+- **禁止非空断言 `!`（维护者硬性标准）**：不得写 `cesiumMod!`、`gisPointLayer!.entities` 等。模块级状态在子函数内用 **`if (cesiumMod && gisPointLayer) { const entities = gisPointLayer.entities … }`** 收窄；单次可选调用用 **`obj?.method()`**（如 `viewerRef.value?.resize()`）。**不用** `!!x` 转布尔，用 `x != null` 或正向 `if (x)`。
 - **自动导入**：`unplugin-auto-import` 已覆盖的 Vue / Vue Router 等 API **不要**再手写重复 `import`，与 `src/auto-imports.d.ts` 生成结果保持一致。
 - **路由**：路由级页面用 **动态 `import()`** 懒加载（与 `src/router/index.ts` 现有写法一致）；勿在入口同步引入大体积页面。
 - **环境变量**：只用 **`import.meta.env`**；暴露给浏览器的变量须 **`VITE_` 前缀**；勿把密钥、令牌写入仓库或提交 `.env.local`。
 - **静态资源**：长期固定 URL、无需哈希的放 **`public/`**；需打包与哈希的放 **`src/assets`** 并用 `import` 或 `new URL(..., import.meta.url)` 引用。
 - **副作用清理**：`watch`、定时器、`addEventListener`、第三方订阅等，在 **`onBeforeUnmount` / `onUnmounted`** 中成对撤销，避免泄漏与卸载后回调。
 - **Props / Emit**：`defineProps` / `defineEmits` **带类型**；禁止子组件直接 **修改 props**；事件名与 payload 与父级约定一致。
-- **响应式**：仅视图驱动的数据用 `ref` / `reactive`；大体量或非树形数据（地图实例、巨型列表项）优先 **`shallowRef`**，避免深度代理开销。
+- **响应式（维护者硬性标准）**：**非必要不使用 `shallowRef`**，优先 **`ref`**、**`reactive`**；仅确有性能问题且维护者认可时，才对超大实例或巨型列表项使用 `shallowRef`。
 - **Vite 配置**：勿随意改动 **`vite.config.ts`** 中与 **Cesium、`@zip.js/zip.js` alias** 相关的 `resolve.alias`，改动后必须 **`npm run build`** 验证。
 
 ## 代码习惯
 
 - **Git 提交说明**：每次提交、推送时，提交信息（标题或正文）须包含 **`cxx`**。
 - 改前读上下文；命名、类型、导入与周边一致。
-- 不删与任务无关的注释或逻辑；不写冗长占位注释。
+- 不删与任务无关的注释或逻辑。
+- **注释（维护者硬性标准）**：**有必要须写**。每个函数/方法前有 **`/** 做什么 */`** 一类简要说明；业务规则、接口含义、地图/Cesium 等非显然取舍须保留注释。与「逻辑简单、代码少量」并行：注释说明用途与原因，代码仍保持简短，**不写**复述代码字面的占位注释。
 - 不擅自新增用户未要求的说明性文档（用户明确要求除外）。
 
 ### 简洁与风格（维护者偏好）
 
+- **逻辑简单、代码少量**（维护者硬性标准）：用**最少、最直白**的代码实现当前功能；**禁止**为「稳妥」叠非必要判断（如重复 `isDestroyed`、多层 `ready` 包装）、非必要参数、非必要私有方法/薄封装。不写无实际作用的语句；互斥分支用 `if / else if / else`；**避免** `if (!cond) return` 及同一函数内连续守卫早退，前置条件用正向 `if (cond) { … }`（异步流程可嵌套一层，await 后再判一次即可）。**能放在外面的数据就放在外面**：模块级 `ref` / `let` 能承载的状态写在 `<script setup>` 顶层，子函数内直接读，**非必要不层层传参**。**接口数据**：`await` 后写入模块级列表（如 `gisPointList`）；逐条绘制时在循环内赋值「当前点位」到模块级（如 `gisPoint`），`addGisPoint()`、`addAlarmGisPoint()` 等**无参**，内部读 `gisPoint`，避免 `renderGisPoints(records)` → `addGisPoint(rec)` → `addAlarmGisPoint(rec)` 链式追参。
 - **单一业务、少发散**：业务范围已明确（如本仓库仅重庆）时，按**唯一路径**实现；维护者**未特别提出**时，不加可选 prop、功能开关、`if/else` 多模式，也不为「以后可能复用」预留抽象。仅在明确要求多场景、可配置或可复用时再拆分。
 - **少冗余判断与转换**：维护者**未要求**时，不对已是正确形态的值再包一层判断、编码/解码（如无需则不用 `encodeURIComponent`）、或「防御性」类型转换；接口或规范**明确要求**时再处理。
 - **卸载取消标志**：维护者**未明确要求**时，不增加「卸载后置位 + 异步内反复检测取消」类标志（如 `*LoadCancelled`）、不向工具函数传 `isCancelled` 类选项；确有复现场景或产品要求避免异步晚于卸载仍操作实例时再实现。
 - **忌样板**：非必要不写 `void` 包一层 Promise；不在 `onMounted` 已能拿到 DOM 时再套一层无收益的 `nextTick` 仅为了 init；不为「偏门卸载竞态」叠 `destroyed` + `catch` 内再判断，除非产品明确要求。
-- **地图容器与类型**：初始化放在 `onMounted`，直接 `initCesium(containerRef.value!)`；避免再套 `const el` + `if (!el) return` 等冗余判空。
+- **地图容器与类型**：`onMounted` 内只调 `initCesium()`；函数内读 `containerRef.value as HTMLElement`，**勿**把容器当参数传入，也**不必**运行时 `if (el)` 判空；禁止 `containerRef.value!`。
+- **代码书写顺序（维护者硬性标准）**：单文件内函数与常量按**实际跑起来的先后**排列，便于从上到下阅读；用 `// ---------- N. 阶段名 ----------` 分段。地图/大屏典型顺序：**模块状态 → 初始化地图 → 区域图层 → 点位（图层/贴图/绘制/拉数）→ 动画或交互 → 卸载**。子函数放在所属阶段内：先底层辅助再入口；事件回调（`onViewerReady`、`onRegionReady` 等）紧挨本阶段最后一环。仅某阶段使用的常量/数组放在该阶段前，勿为编译把整段动画配置堆在文件最顶（绘制阶段登记 `rippleAnims` 等除外，可与绘制同段）。
 - **`import.meta.env`**：能一行取用的不要叠 `if/else` + `console.warn` 分支（除非明确要求提示用户）。
 - **`as const`**：非必要不用；需满足 Cesium/字面量类型时用**显式类型**（如 `Viewer.ConstructorOptions`）或显式数组元素类型，而非依赖大面积 `as const`。**已通过 `vue-tsc` 的写法勿再叠 `as const`**；`CesiumMap.vue` 与 `Map.vue` 等同类片段改一处须同步另一处，避免回潮。
 - **地图运行时错误**：非必要不用整段 `try/catch` 包住 init；渲染期异常优先 **`viewer.scene.renderError`**（按需 `showRenderLoopErrors: false`）与既有 `emit` 对齐。
+- **非必要代码与性能（维护者硬性标准）**：只写**当前业务必需**的语句；不为「看起来更稳」增加备用函数、重复清空、重复挂层、多余 `requestRender` / `resize` / 监听器。实现前先想**能否用更少步骤达到同一效果**。
+- **Cesium 图层与重绘**：`dataSources` / `entities` 的叠放顺序在**首次 `add` 的时机**上保证即可（如监测点仅在 `region-ready` 后 `dataSources.add`，自然在末尾）；**禁止**无必要的 `remove` + 再 `add` 抬层（原 `raiseGisPointLayer` 一类）。全量重绘时只保留一次有意义的 `clear` + 循环 `add`，不为「刚新建的空图层」再套专用分支。动画循环、ResizeObserver 等**有实际需求才开**，不默认叠双重驱动。
 
 ## 降低 Token 使用
 

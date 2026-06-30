@@ -1,11 +1,14 @@
 /**
- * 在 Cesium 上绘制重庆市行政区域：外区压暗遮罩 + 镂空 + 绿色发光边界 + 内区提亮 + 主支流河流线
- * 边界数据：阿里云 DataV（需浏览器可访问外网）
+ * 重庆市域圈定（参考大屏样式）：暗色遮罩 + 镂空 + 青色浮雕 + 发光边界
+ * 边界：DataV 500000（省级轮廓；勿用 500000_full，其为 38 个区县会误取 features[0]）
+ *
+ * 书写顺序：视口/常量 → 几何辅助 → 区域绘制 → addChongqingRegionStyle 入口
  */
-const CHONGQING_GEOJSON =
-  'https://geo.datav.aliyun.com/areas_v3/bound/500000_full.json'
+const CHONGQING_GEOJSON = 'https://geo.datav.aliyun.com/areas_v3/bound/500000.json'
 
-/** 重庆市域大致范围：首帧取景与网络失败时仍能看到重庆 */
+const CYAN_GLOW = '#22d3ee'
+const CYAN_LINE = '#a5f3fc'
+
 export const CHONGQING_VIEW_RECT_DEG = {
   west: 105.2,
   south: 28.05,
@@ -13,10 +16,95 @@ export const CHONGQING_VIEW_RECT_DEG = {
   north: 32.35,
 }
 
+export const CHONGQING_URBAN_VIEW_DEG = {
+  west: 106.36,
+  south: 29.44,
+  east: 106.7,
+  north: 29.64,
+}
+
+/** 浮雕高度相对基准的比例（维护者要求约为原高度的 1/3） */
+const RELIEF_HEIGHT_SCALE = 1 / 3
+
+/** 最近一次绘制后的浮雕顶面高度（米），供点位层对齐 */
+let reliefTopHeightM = 22000 * RELIEF_HEIGHT_SCALE
+
+export function getChongqingReliefTopHeight(): number {
+  return reliefTopHeightM
+}
+
+type ReliefProfile = {
+  top: number
+  shadowEnd: number
+  layer1: number
+  layer2: number
+  layer3: number
+  layer4: number
+}
+
+function reliefProfileFromBbox(
+  Cesium: CesiumMod,
+  west: number,
+  south: number,
+  east: number,
+  north: number,
+): ReliefProfile {
+  const midLat = (south + north) * 0.5
+  const cosLat = Math.cos(Cesium.Math.toRadians(midLat))
+  const widthM = (east - west) * 111320 * cosLat
+  const heightM = (north - south) * 110540
+  const diag = Math.hypot(widthM, heightM)
+  const top = Cesium.Math.clamp(
+    diag * 0.058 * RELIEF_HEIGHT_SCALE,
+    22000 * RELIEF_HEIGHT_SCALE,
+    72000 * RELIEF_HEIGHT_SCALE,
+  )
+  return {
+    top,
+    shadowEnd: top * 0.09,
+    layer1: top * 0.3,
+    layer2: top * 0.52,
+    layer3: top * 0.74,
+    layer4: top * 0.9,
+  }
+}
+
+let reliefTopGradientUrl: string | undefined
+
+function reliefTopGradientDataUrl(): string {
+  if (reliefTopGradientUrl) {
+    return reliefTopGradientUrl
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 256
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    const g = ctx.createRadialGradient(128, 88, 8, 128, 128, 148)
+    g.addColorStop(0, 'rgba(204, 251, 241, 0.92)')
+    g.addColorStop(0.42, 'rgba(45, 212, 191, 0.72)')
+    g.addColorStop(1, 'rgba(4, 47, 46, 0.45)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, 256, 256)
+    reliefTopGradientUrl = canvas.toDataURL()
+    return reliefTopGradientUrl
+  }
+  return ''
+}
+
+function enableReliefLighting(Cesium: CesiumMod, viewer: Viewer) {
+  viewer.scene.globe.enableLighting = true
+  viewer.scene.light = new Cesium.DirectionalLight({
+    direction: new Cesium.Cartesian3(0.42, -0.58, -0.7),
+    intensity: 1.55,
+  })
+}
+
 type CesiumMod = typeof import('cesium')
 type Viewer = import('cesium').Viewer
+type GeoPolygon = { type: 'Polygon'; coordinates: number[][][] }
+type GeoMultiPolygon = { type: 'MultiPolygon'; coordinates: number[][][][] }
 
-/** 中国重庆上空俯视朝向 */
 function chongqingCameraOrientation(Cesium: CesiumMod) {
   return {
     heading: Cesium.Math.toRadians(0),
@@ -25,35 +113,17 @@ function chongqingCameraOrientation(Cesium: CesiumMod) {
   }
 }
 
-/**
- * 使用 camera.flyTo 飞往重庆一带（destination 为经纬度矩形）
- * @param durationSeconds 飞行时长（秒）
- */
-function flyCameraToChongqingRectangle(
-  Cesium: CesiumMod,
-  viewer: Viewer,
-  west: number,
-  south: number,
-  east: number,
-  north: number,
-  durationSeconds = 2,
-) {
-  viewer.camera.flyTo({
-    destination: Cesium.Rectangle.fromDegrees(west, south, east, north),
+// ---------- 1. 视口（初始化地图时 presetChongqingViewport）----------
+export function presetChongqingViewport(Cesium: CesiumMod, viewer: Viewer) {
+  const r = CHONGQING_VIEW_RECT_DEG
+  const center = { lon: (r.west + r.east) / 2, lat: (r.south + r.north) / 2 }
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(center.lon, center.lat, 720000),
     orientation: chongqingCameraOrientation(Cesium),
-    duration: durationSeconds,
   })
 }
 
-/** 在边界 JSON 返回前先飞往重庆，避免首屏空白 */
-export function presetChongqingViewport(Cesium: CesiumMod, viewer: Viewer) {
-  const r = CHONGQING_VIEW_RECT_DEG
-  flyCameraToChongqingRectangle(Cesium, viewer, r.west, r.south, r.east, r.north, 1.5)
-}
-
-type GeoPolygon = { type: 'Polygon'; coordinates: number[][][] }
-type GeoMultiPolygon = { type: 'MultiPolygon'; coordinates: number[][][][] }
-
+// ---------- 2. 几何与 GeoJSON 辅助 ----------
 function ringToFlat(ring: number[][]): number[] {
   const flat: number[] = []
   for (const [lon, lat] of ring) {
@@ -67,17 +137,44 @@ function ringToFlat(ring: number[][]): number[] {
   return flat
 }
 
-function ringToDegreesHeights(ring: number[][], height: number): number[] {
-  const flat: number[] = []
-  for (const pt of ring) {
-    flat.push(pt[0], pt[1], height)
+function openRing(ring: number[][]): number[][] {
+  if (
+    ring.length > 1 &&
+    ring[0][0] === ring[ring.length - 1][0] &&
+    ring[0][1] === ring[ring.length - 1][1]
+  ) {
+    return ring.slice(0, -1)
   }
-  const a = ring[0]
-  const b = ring[ring.length - 1]
-  if (a[0] !== b[0] || a[1] !== b[1]) {
-    flat.push(a[0], a[1], height)
+  return ring
+}
+
+/** 加密边界折点为平滑曲线 */
+function densifyRing(ring: number[][], maxSegmentDeg = 0.012): number[][] {
+  const pts = openRing(ring)
+  const result: number[][] = []
+  for (let i = 0; i < pts.length; i++) {
+    const [lon0, lat0] = pts[i]
+    const [lon1, lat1] = pts[(i + 1) % pts.length]
+    result.push([lon0, lat0])
+    const steps = Math.max(1, Math.ceil(Math.hypot(lon1 - lon0, lat1 - lat0) / maxSegmentDeg))
+    for (let s = 1; s < steps; s++) {
+      const t = s / steps
+      result.push([lon0 + (lon1 - lon0) * t, lat0 + (lat1 - lat0) * t])
+    }
   }
-  return flat
+  return result
+}
+
+function ringToEdgePositions(Cesium: CesiumMod, ring: number[][], height: number) {
+  const ellipsoid = Cesium.Ellipsoid.WGS84
+  const out: InstanceType<CesiumMod['Cartesian3']>[] = []
+  for (const [lon, lat] of densifyRing(ring)) {
+    out.push(ellipsoid.cartographicToCartesian(Cesium.Cartographic.fromDegrees(lon, lat, height)))
+  }
+  if (out.length > 0) {
+    out.push(out[0])
+  }
+  return out
 }
 
 function polygonToHierarchy(Cesium: CesiumMod, rings: number[][][]) {
@@ -85,227 +182,355 @@ function polygonToHierarchy(Cesium: CesiumMod, rings: number[][][]) {
   const holes = rings
     .slice(1)
     .map(
-      (lake) =>
-        new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ringToFlat(lake))),
+      (lake) => new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ringToFlat(lake))),
     )
   return new Cesium.PolygonHierarchy(exterior, holes)
 }
 
-function collectPartHierarchies(Cesium: CesiumMod, geometry: GeoPolygon | GeoMultiPolygon) {
-  if (geometry.type === 'Polygon') {
-    return [polygonToHierarchy(Cesium, geometry.coordinates)]
+function ringSignedArea(ring: number[][]): number {
+  let area = 0
+  const n = ring.length - 1
+  for (let i = 0; i < n; i++) {
+    const [x0, y0] = ring[i]
+    const [x1, y1] = ring[i + 1]
+    area += x0 * y1 - x1 * y0
   }
-  return geometry.coordinates.map((polyRings) => polygonToHierarchy(Cesium, polyRings))
+  return Math.abs(area * 0.5)
 }
 
-function collectExteriorRings(geometry: GeoPolygon | GeoMultiPolygon): number[][][] {
-  if (geometry.type === 'Polygon') {
-    return [geometry.coordinates[0]]
-  }
-  return geometry.coordinates.map((poly) => poly[0])
+function partKey(polyRings: number[][][]): string {
+  const p = polyRings[0][0]
+  return `${p[0]},${p[1]}`
 }
 
-function bboxFromGeometry(geometry: GeoPolygon | GeoMultiPolygon) {
+/** 仅主轮廓（面积最大的一块） */
+function pickMainPolygonGeometry(geometry: GeoPolygon | GeoMultiPolygon): GeoPolygon {
+  if (geometry.type === 'Polygon') {
+    return geometry
+  }
+  let maxArea = -1
+  let mainRings = geometry.coordinates[0]
+  for (const polyRings of geometry.coordinates) {
+    const area = ringSignedArea(polyRings[0])
+    if (area > maxArea) {
+      maxArea = area
+      mainRings = polyRings
+    }
+  }
+  return { type: 'Polygon', coordinates: mainRings }
+}
+
+/** MultiPolygon 中除主轮廓外的飞地（左下常见为独立小块） */
+function listExclaveParts(
+  geometry: GeoPolygon | GeoMultiPolygon,
+  main: GeoPolygon,
+): number[][][][] {
+  if (geometry.type === 'Polygon') {
+    return []
+  }
+  const mainKey = partKey(main.coordinates)
+  return geometry.coordinates.filter((poly) => partKey(poly) !== mainKey)
+}
+
+/** 只用外环：去掉湖泊内环，避免内环边在浮雕顶面形成“线圈” */
+function exteriorOnly(geom: GeoPolygon): GeoPolygon {
+  return { type: 'Polygon', coordinates: [geom.coordinates[0]] }
+}
+
+function bboxFromRing(ring: number[][]) {
   let west = 180
   let south = 90
   let east = -180
   let north = -90
-  for (const ring of collectExteriorRings(geometry)) {
-    for (const [lon, lat] of ring) {
-      west = Math.min(west, lon)
-      east = Math.max(east, lon)
-      south = Math.min(south, lat)
-      north = Math.max(north, lat)
-    }
+  for (const [lon, lat] of ring) {
+    west = Math.min(west, lon)
+    east = Math.max(east, lon)
+    south = Math.min(south, lat)
+    north = Math.max(north, lat)
   }
   return { west, south, east, north }
 }
 
-function flyCameraToChongqingBbox(
+function removeChongqingLayerEntities(viewer: Viewer) {
+  if (viewer.isDestroyed()) return
+  const toRemove = viewer.entities.values.filter((e) => {
+    const name = e.name ?? ''
+    return name.startsWith('重庆-')
+  })
+  for (const entity of toRemove) {
+    viewer.entities.remove(entity)
+  }
+}
+
+function flyCameraToBbox(
   Cesium: CesiumMod,
   viewer: Viewer,
-  geometry: GeoPolygon | GeoMultiPolygon,
+  west: number,
+  south: number,
+  east: number,
+  north: number,
 ) {
-  const { west, south, east, north } = bboxFromGeometry(geometry)
-  const lonSpan = Math.max(east - west, 0.25)
-  const latSpan = Math.max(north - south, 0.2)
-  const padLon = Math.max(lonSpan * 0.12, 0.08)
-  const padLat = Math.max(latSpan * 0.12, 0.08)
-
-  flyCameraToChongqingRectangle(
-    Cesium,
-    viewer,
+  if (viewer.isDestroyed()) return
+  const padLon = Math.max((east - west) * 0.26, 0.22)
+  const padLat = Math.max((north - south) * 0.26, 0.2)
+  const rect = Cesium.Rectangle.fromDegrees(
     west - padLon,
     south - padLat,
     east + padLon,
     north + padLat,
-    2.2,
   )
+
+  viewer.camera.flyTo({
+    destination: rect,
+    duration: 2.2,
+    orientation: {
+      heading: 0,
+      pitch: Cesium.Math.toRadians(-94),
+      roll: 0,
+    },
+  })
 }
 
-function flyCameraFallback(Cesium: CesiumMod, viewer: Viewer) {
-  const r = CHONGQING_VIEW_RECT_DEG
-  flyCameraToChongqingRectangle(Cesium, viewer, r.west, r.south, r.east, r.north, 1.8)
-}
-
-export async function addChongqingRegionStyle(
+// ---------- 3. 重庆区域实体绘制 ----------
+function drawChongqingRegion(
   Cesium: CesiumMod,
   viewer: Viewer,
-): Promise<void> {
-  let res: Response
-  try {
-    res = await fetch(CHONGQING_GEOJSON)
-  } catch (e) {
-    console.warn('[chongqingMapLayer] 边界数据请求失败', e)
-    flyCameraFallback(Cesium, viewer)
-    return
-  }
-  if (!res.ok) {
-    flyCameraFallback(Cesium, viewer)
-    return
-  }
+  geom: GeoPolygon,
+  exclaves: number[][][][],
+) {
+  if (viewer.isDestroyed()) return
+  enableReliefLighting(Cesium, viewer)
 
-  let gj: { features?: { geometry: GeoPolygon | GeoMultiPolygon }[] }
-  try {
-    gj = await res.json()
-  } catch {
-    flyCameraFallback(Cesium, viewer)
-    return
-  }
-  const feature = gj.features?.[0]
-  if (!feature?.geometry) {
-    flyCameraFallback(Cesium, viewer)
-    return
-  }
+  const maskMaterial = Cesium.Color.fromCssColorString('#020808').withAlpha(0.72)
+  const ring = geom.coordinates[0]
+  const hierarchy = polygonToHierarchy(Cesium, geom.coordinates)
+  const bbox = bboxFromRing(ring)
+  const relief = reliefProfileFromBbox(Cesium, bbox.west, bbox.south, bbox.east, bbox.north)
+  reliefTopHeightM = relief.top
 
-  const geom = feature.geometry
-  if (geom.type !== 'Polygon' && geom.type !== 'MultiPolygon') {
-    flyCameraFallback(Cesium, viewer)
-    return
-  }
-
-  const partHierarchies = collectPartHierarchies(Cesium, geom)
+  const topGradient = reliefTopGradientDataUrl()
+  const topCapMaterial = topGradient
+    ? new Cesium.ImageMaterialProperty({
+        image: topGradient,
+        transparent: true,
+      })
+    : Cesium.Color.fromCssColorString('#5eead4').withAlpha(0.82)
 
   viewer.entities.add({
     name: '重庆-外区压暗',
     polygon: {
       hierarchy: new Cesium.PolygonHierarchy(
         Cesium.Cartesian3.fromDegreesArray([72, 8, 138, 8, 138, 42, 72, 42, 72, 8]),
-        partHierarchies,
+        [hierarchy],
       ),
       height: 0,
-      material: Cesium.Color.fromCssColorString('#031208').withAlpha(0.68),
+      material: maskMaterial,
       outline: false,
       perPositionHeight: false,
     },
   })
 
-  for (const h of partHierarchies) {
+  viewer.entities.add({
+    name: '重庆-投影阴影',
+    polygon: {
+      hierarchy,
+      height: 0,
+      extrudedHeight: relief.shadowEnd,
+      material: Cesium.Color.BLACK.withAlpha(0.5),
+      outline: false,
+      perPositionHeight: false,
+    },
+  })
+
+  viewer.entities.add({
+    name: '重庆-浮雕底座',
+    polygon: {
+      hierarchy,
+      height: 0,
+      extrudedHeight: relief.layer1,
+      material: Cesium.Color.fromCssColorString('#022c22').withAlpha(0.98),
+      outline: false,
+      perPositionHeight: false,
+    },
+  })
+
+  viewer.entities.add({
+    name: '重庆-浮雕下层',
+    polygon: {
+      hierarchy,
+      height: relief.layer1,
+      extrudedHeight: relief.layer2,
+      material: Cesium.Color.fromCssColorString('#064e3b').withAlpha(0.96),
+      outline: false,
+      perPositionHeight: false,
+    },
+  })
+
+  viewer.entities.add({
+    name: '重庆-浮雕中层',
+    polygon: {
+      hierarchy,
+      height: relief.layer2,
+      extrudedHeight: relief.layer3,
+      material: Cesium.Color.fromCssColorString('#0f766e').withAlpha(0.94),
+      outline: false,
+      perPositionHeight: false,
+    },
+  })
+
+  viewer.entities.add({
+    name: '重庆-浮雕上层',
+    polygon: {
+      hierarchy,
+      height: relief.layer3,
+      extrudedHeight: relief.layer4,
+      material: Cesium.Color.fromCssColorString('#14b8a6').withAlpha(0.9),
+      outline: false,
+      perPositionHeight: false,
+    },
+  })
+
+  viewer.entities.add({
+    name: '重庆-浮雕顶面',
+    polygon: {
+      hierarchy,
+      height: relief.layer4,
+      extrudedHeight: relief.top,
+      material: topCapMaterial,
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString(CYAN_LINE).withAlpha(0.35),
+      outlineWidth: 1,
+      perPositionHeight: false,
+    },
+  })
+
+  const edgePositions = ringToEdgePositions(Cesium, ring, relief.top)
+  const bevelPositions = ringToEdgePositions(Cesium, ring, relief.layer4)
+
+  viewer.entities.add({
+    name: '重庆-浮雕棱线',
+    polyline: {
+      positions: bevelPositions,
+      width: 2.5,
+      material: Cesium.Color.fromCssColorString('#134e4a').withAlpha(0.65),
+      arcType: Cesium.ArcType.NONE,
+    },
+  })
+
+  viewer.entities.add({
+    name: '重庆-边界光晕',
+    polyline: {
+      positions: edgePositions,
+      width: 8,
+      material: new Cesium.PolylineGlowMaterialProperty({
+        glowPower: 0.32,
+        color: Cesium.Color.fromCssColorString(CYAN_GLOW).withAlpha(1),
+      }),
+      arcType: Cesium.ArcType.NONE,
+    },
+  })
+
+  viewer.entities.add({
+    name: '重庆-边界线',
+    polyline: {
+      positions: edgePositions.slice(),
+      width: 2.4,
+      material: Cesium.Color.fromCssColorString(CYAN_LINE).withAlpha(1),
+      arcType: Cesium.ArcType.NONE,
+    },
+  })
+
+  const exclaveCover = Cesium.Color.fromCssColorString('#020808').withAlpha(1)
+  for (const polyRings of exclaves) {
     viewer.entities.add({
-      name: '重庆-内区提亮',
+      name: '重庆-飞地压暗',
       polygon: {
-        hierarchy: h,
-        height: 0,
-        material: Cesium.Color.fromCssColorString('#22c55e').withAlpha(0.11),
+        hierarchy: polygonToHierarchy(Cesium, polyRings),
+        height: relief.top + 500,
+        material: exclaveCover,
         outline: false,
         perPositionHeight: false,
       },
     })
   }
 
-  for (const ring of collectExteriorRings(geom)) {
-    const shadowRing = ring.map(([lon, lat]) => [lon + 0.018, lat - 0.018] as [number, number])
-    const shadowFlat = ringToDegreesHeights(shadowRing, 350)
-    const glowFlat = ringToDegreesHeights(ring, 520)
+  flyCameraToBbox(Cesium, viewer, bbox.west, bbox.south, bbox.east, bbox.north)
+}
 
-    viewer.entities.add({
-      name: '重庆-边界影',
-      polyline: {
-        positions: Cesium.Cartesian3.fromDegreesArrayHeights(shadowFlat),
-        width: 16,
-        material: Cesium.Color.fromCssColorString('#001a0f').withAlpha(0.75),
-        arcType: Cesium.ArcType.GEODESIC,
-      },
-    })
+// ---------- 4. 区域入口（拉 GeoJSON → drawChongqingRegion，CesiumMap region-ready 前）----------
+export async function addChongqingRegionStyle(Cesium: CesiumMod, viewer: Viewer): Promise<void> {
+  if (viewer.isDestroyed()) return
+  removeChongqingLayerEntities(viewer)
 
-    viewer.entities.add({
-      name: '重庆-边界光',
-      polyline: {
-        positions: Cesium.Cartesian3.fromDegreesArrayHeights(glowFlat),
-        width: 5,
-        material: new Cesium.PolylineGlowMaterialProperty({
-          glowPower: 0.24,
-          color: Cesium.Color.fromCssColorString('#4ade80').withAlpha(0.96),
-        }),
-        arcType: Cesium.ArcType.GEODESIC,
-      },
-    })
-
-    viewer.entities.add({
-      name: '重庆-边界线芯',
-      polyline: {
-        positions: Cesium.Cartesian3.fromDegreesArrayHeights(glowFlat),
-        width: 1.6,
-        material: Cesium.Color.fromCssColorString('#bbf7d0').withAlpha(0.96),
-        arcType: Cesium.ArcType.GEODESIC,
-      },
-    })
+  let res: Response
+  try {
+    res = await fetch(CHONGQING_GEOJSON)
+  } catch (e) {
+    console.warn('[chongqingMapLayer] 边界数据请求失败', e)
+    flyCameraToBbox(
+      Cesium,
+      viewer,
+      CHONGQING_VIEW_RECT_DEG.west,
+      CHONGQING_VIEW_RECT_DEG.south,
+      CHONGQING_VIEW_RECT_DEG.east,
+      CHONGQING_VIEW_RECT_DEG.north,
+    )
+    return
+  }
+  if (viewer.isDestroyed()) return
+  if (!res.ok) {
+    flyCameraToBbox(
+      Cesium,
+      viewer,
+      CHONGQING_VIEW_RECT_DEG.west,
+      CHONGQING_VIEW_RECT_DEG.south,
+      CHONGQING_VIEW_RECT_DEG.east,
+      CHONGQING_VIEW_RECT_DEG.north,
+    )
+    return
   }
 
-  const mainFlat = ringToDegreesHeights(
-    [
-      [105.95, 28.75],
-      [106.55, 29.05],
-      [107.05, 29.35],
-      [107.55, 29.55],
-      [108.15, 29.58],
-      [108.75, 29.45],
-    ],
-    650,
-  )
+  let gj: {
+    features?: {
+      geometry: GeoPolygon | GeoMultiPolygon
+      properties?: { adcode?: number | string }
+    }[]
+  }
+  try {
+    gj = await res.json()
+  } catch {
+    flyCameraToBbox(
+      Cesium,
+      viewer,
+      CHONGQING_VIEW_RECT_DEG.west,
+      CHONGQING_VIEW_RECT_DEG.south,
+      CHONGQING_VIEW_RECT_DEG.east,
+      CHONGQING_VIEW_RECT_DEG.north,
+    )
+    return
+  }
+  if (viewer.isDestroyed()) return
 
-  viewer.entities.add({
-    name: '河流-支流',
-    polyline: {
-      positions: Cesium.Cartesian3.fromDegreesArrayHeights(
-        ringToDegreesHeights(
-          [
-            [105.65, 29.55],
-            [106.2, 29.75],
-            [106.85, 29.85],
-            [107.45, 29.7],
-          ],
-          650,
-        ),
-      ),
-      width: 3.5,
-      material: Cesium.Color.fromCssColorString('#6ee7b7').withAlpha(0.82),
-      arcType: Cesium.ArcType.GEODESIC,
-    },
-  })
+  const feature =
+    gj.features?.find((f) => {
+      const code = f.properties?.adcode
+      return code === 500000 || code === '500000'
+    }) ?? gj.features?.[0]
+  const raw = feature?.geometry
+  if (!raw || (raw.type !== 'Polygon' && raw.type !== 'MultiPolygon')) {
+    flyCameraToBbox(
+      Cesium,
+      viewer,
+      CHONGQING_VIEW_RECT_DEG.west,
+      CHONGQING_VIEW_RECT_DEG.south,
+      CHONGQING_VIEW_RECT_DEG.east,
+      CHONGQING_VIEW_RECT_DEG.north,
+    )
+    return
+  }
 
-  viewer.entities.add({
-    name: '河流-干流底层',
-    polyline: {
-      positions: Cesium.Cartesian3.fromDegreesArrayHeights(mainFlat),
-      width: 12,
-      material: Cesium.Color.fromCssColorString('#064e3b').withAlpha(0.5),
-      arcType: Cesium.ArcType.GEODESIC,
-    },
-  })
-
-  viewer.entities.add({
-    name: '河流-干流高光',
-    polyline: {
-      positions: Cesium.Cartesian3.fromDegreesArrayHeights(mainFlat),
-      width: 7,
-      material: new Cesium.PolylineGlowMaterialProperty({
-        glowPower: 0.3,
-        color: Cesium.Color.fromCssColorString('#4ade80').withAlpha(0.98),
-      }),
-      arcType: Cesium.ArcType.GEODESIC,
-    },
-  })
-
-  flyCameraToChongqingBbox(Cesium, viewer, geom)
+  const main = pickMainPolygonGeometry(raw)
+  const exclaves = listExclaveParts(raw, main)
+  if (viewer.isDestroyed()) return
+  drawChongqingRegion(Cesium, viewer, exteriorOnly(main), exclaves)
 }

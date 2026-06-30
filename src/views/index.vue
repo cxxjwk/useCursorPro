@@ -10,59 +10,59 @@
   </main>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .view-index {
   box-sizing: border-box;
   max-width: 640px;
   margin: 0 auto;
   padding: 48px 24px 80px;
-}
 
-.view-index__title {
-  margin: 0 0 12px;
-}
+  &__title {
+    margin: 0 0 12px;
+  }
 
-.view-index__lead {
-  margin: 0 0 28px;
-  color: var(--text);
-  line-height: 1.5;
-}
+  &__lead {
+    margin: 0 0 28px;
+    color: var(--text);
+    line-height: 1.5;
+  }
 
-.view-index__nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
+  &__nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 
-.view-index__link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 18px;
-  border-radius: 10px;
-  font-size: 15px;
-  font-weight: 500;
-  text-decoration: none;
-  border: 1px solid var(--border);
-  color: var(--text-h);
-  background: var(--bg);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
+  &__link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 15px;
+    font-weight: 500;
+    text-decoration: none;
+    border: 1px solid var(--border);
+    color: var(--text-h);
+    background: var(--bg);
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
 
-.view-index__link:hover {
-  border-color: var(--accent-border);
-  box-shadow: var(--shadow);
-}
+    &:hover {
+      border-color: var(--accent-border);
+      box-shadow: var(--shadow);
+    }
 
-.view-index__link--primary {
-  border-color: var(--accent-border);
-  background: var(--accent-bg);
-  color: var(--text-h);
-}
+    &--primary {
+      border-color: var(--accent-border);
+      background: var(--accent-bg);
+      color: var(--text-h);
+    }
 
-.view-index__link.router-link-active {
-  font-weight: 600;
+    &.router-link-active {
+      font-weight: 600;
+    }
+  }
 }
 </style>

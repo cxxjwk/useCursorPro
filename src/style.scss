@@ -50,7 +50,9 @@
   }
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
 }
 
@@ -172,11 +174,20 @@ code {
 #app.dashboard-root {
   width: 100%;
   max-width: none;
+  height: 100svh;
   margin: 0;
   border: none;
   min-height: 100svh;
   padding: 0;
   text-align: left;
+  overflow: hidden;
+}
+
+#app.dashboard-root > *:last-child {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 #center {

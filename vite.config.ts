@@ -13,6 +13,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export default defineConfig({
   server: {
     open: false,
+    proxy: {
+      '/tianditu-proxy': {
+        target: 'https://t0.tianditu.gov.cn',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/tianditu-proxy/, ''),
+      },
+    },
   },
   preview: {
     open: false,
